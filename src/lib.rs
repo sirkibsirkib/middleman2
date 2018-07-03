@@ -26,9 +26,11 @@ impl Bufferer {
 			len: None,
 		}
 	}
-	pub fn try_read_from<R>(&mut self, mut r: R) -> Result<Option<&mut [u8]>, io::Error> where R: io::Read {
+	pub fn try_read_from<R>(&mut self, mut r: R) ->
+			Result<Option<&mut [u8]>, io::Error>
+	where R: io::Read
+	{
 		loop {
-			// println!("loop");
 			// determine how many bytes next read() call should attempt to get
 			let read_to = if let Some((payload_bytes, len_bytes)) = self.len {
 				// len of payload is known. _that_ number of bytes + len offset
@@ -41,35 +43,25 @@ impl Bufferer {
 				size_buffer_to(&mut self.buffer, t);
 				t
 			};
-			println!("read to {}", read_to);
 			// read into unoccupied part of buffer
 			match r.read(&mut self.buffer[self.occupied..read_to]) {
 				Ok(bytes_read) => {
-					// println!("Read OK. {} bytes", bytes_read);
 					self.occupied += bytes_read;
-					// println!("len is {:?}", self.len);
 					if let Some((payload_bytes, len_bytes)) = self.len {
 						// reading payload
-						// println!("payload {}  VS occupied {}", payload_bytes, self.occupied);
 						if payload_bytes as usize + len_bytes as usize 	== self.occupied {
-							// println!("payload match");
-							//reset state. return result.
+							//reset state. return result in-place
 							let temp = self.occupied;
 							self.occupied = 0;
 							self.len = None;
 							return Ok(Some(&mut self.buffer[len_bytes as usize..temp]));
-						} else {
-							//continue spinning
-							// println!("continue spinning");
-						}
+						} 
+						// else, continue spinning
 					} else {
 						// reading len preamble
-						println!("reading len");
 						match (&self.buffer[..self.occupied]).read_varint() {
 							Err(e) => {
-								println!("varinit err!");
 								if e.kind() == ErrorKind::UnexpectedEof {
-									println!("varint not ready");
 									return Ok(None);
 								} else {
 									println!("varint BROKEN");
@@ -77,17 +69,18 @@ impl Bufferer {
 								}
 							},
 							Ok(x) => {
-								println!("varint is {:?}", x);
 								self.len = Some((x, x.required_space() as u8));
 							},
 						}
 					}
 				},
 				Err(e) => {
+					// error attempting to read
 					if e.kind() == ErrorKind::WouldBlock {
+						// reader isnt broken, just isnt ready.
 						return Ok(None);
 					} else {
-						println!("Read ERR");
+						// reader state is bust. report err.
 						return Err(e);
 					}
 				},
@@ -99,9 +92,7 @@ impl Bufferer {
 pub fn write_into<W>(mut w: W, bytes: &[u8]) -> io::Result<()> where W: Write + Sized {
 	w.write_varint(bytes.len())?;
 	let b = w.write_all(bytes)?;
-	w.flush()
 }
-
 
 #[cfg(test)] 
 mod tests;
