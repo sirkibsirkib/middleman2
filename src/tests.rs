@@ -2,44 +2,97 @@ use super::*;
 
 use std::net::{TcpStream,TcpListener};
 use std::thread;
+use std::io::BufWriter;
+use std::time;
 
+lazy_static! {
+    static ref RAW_BYTES: Vec<Vec<u8>> = {
+        vec![
+        	vec![0,1,3,4],
+        	vec![2,3,1],
+        	vec![],
+        	vec![0,32,34,43,34,34,3,2,23,4],
+        ]
+    };
+}	
+
+const SLEEPTIME: time::Duration = time::Duration::from_millis(500);
 
 #[test]
-fn it_works() {
-	let [mut a, mut b] = tcp_pipe();
-	let x = write_into(&mut a, &[1,2,3]).unwrap();
-	println!("wrote {:?}", x);
+fn pipe_raw_bytes() {
+	let (a, mut b) = rw_channel();
+	let mut a = BufWriter::new(a);
 
+	// write
+	for msg in RAW_BYTES.iter() {
+		write_preambled(&mut a, msg).unwrap();
+	}
+	a.flush().unwrap();
 
-	let x = write_into(&mut a, &[6,6,6,6,6,6,123,132,31,2,132,321,123,12,123]).unwrap();
-	println!("wrote {:?}", x);
+	// thread::sleep(SLEEPTIME);
 
+	// read
 	let mut r = Bufferer::new();
-	// let mut buf = [0u8; 64];
-	for x in 0..10 {
-		println!("-------------");
-		let x = r.read_from(&mut b);
-		println!("{:?}", x);
+	for msg in RAW_BYTES.iter() {
+		let x = r.try_read_preambled(&mut b).unwrap().unwrap();
+		assert_eq!(msg, &x);
 	}
 }
 
+#[test]
+fn pipe_raw_bytes_wrapped() {
+	let (a, b) = rw_channel();
+	let (mut a, mut r) = (BufWriter::new(a), ReadWrapper::new(b));
 
-fn tcp_pipe() -> [TcpStream; 2] {
-	for port in 200..=std::u16::MAX {
-		let addr = format!("127.0.0.1:{}", port);
-		if let Ok(listener) = TcpListener::bind(&addr) {
-			let handle = thread::spawn(move || {
-				let x = listener.accept().unwrap().0;
-				x.set_nonblocking(true).unwrap();
-				x
-			});
-			let y = TcpStream::connect(&addr).unwrap();
-			y.set_nonblocking(true).unwrap();
-			return [
-				y,
-				handle.join().unwrap(),
-			];
-		}
+	// write
+	for msg in RAW_BYTES.iter() {
+		write_preambled(&mut a, msg).unwrap();
 	}
-	panic!("NO PORTS LEFT!")
+	a.flush().unwrap();
+
+	// thread::sleep(SLEEPTIME);
+
+	// read
+
+	for msg in RAW_BYTES.iter() {
+		let x = r.try_read_preambled().unwrap().unwrap();
+		assert_eq!(msg, &x);
+	}
 }
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+struct Whatever {
+	x: u32,
+	y: u64,
+	z: String,
+}
+
+
+
+////////////////////// AUX /////////////////////////
+
+fn prep(stream: &TcpStream) {
+	stream.set_nonblocking(true).unwrap();
+	stream.set_nodelay(true).unwrap();
+}
+
+
+// fn tcp_pipe() -> [TcpStream; 2] {
+// 	for port in 200..=std::u16::MAX {
+// 		let addr = format!("127.0.0.1:{}", port);
+// 		if let Ok(listener) = TcpListener::bind(&addr) {
+// 			let handle = thread::spawn(move || {
+// 				let x = listener.accept().unwrap().0;
+// 				prep(&x);
+// 				x
+// 			});
+// 			let y = TcpStream::connect(&addr).unwrap();
+// 			prep(&y);
+// 			return [
+// 				y,
+// 				handle.join().unwrap(),
+// 			];
+// 		}
+// 	}
+// 	panic!("NO PORTS LEFT!")
+// }

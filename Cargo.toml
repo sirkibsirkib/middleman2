@@ -6,6 +6,9 @@ authors = ["sirkibsirkib <christopher.esterhuyse@gmail.com>"]
 [dependencies]
 mio = "0.6"
 serde = "1.0"
-serde_derive = "1.0"
 integer-encoding = "1.0"
-# [dev-dependencies]
+
+[dev-dependencies]
+serde_derive = "1.0"
+bincode = "1.0"
+lazy_static = "1.0"
