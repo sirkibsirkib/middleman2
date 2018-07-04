@@ -96,7 +96,7 @@ impl CanSerialize for Bincoder {
 	fn serialize_into<T,W>(&mut self, t: &T, w: W) -> Result<(), io::Error> where T: Serialize, W: io::Write {
 		match bincode::serialize_into(w, t) {
 			Ok(x) => Ok(x),
-			Err(e) => Err(ErrorKind::InvalidData.into()),
+			Err(_) => Err(ErrorKind::InvalidData.into()),
 		}
 	}
 }
@@ -105,7 +105,7 @@ impl CanDeserialize for Bincoder {
 		println!("PLEASE DESERIALIZE {:?}", bytes);
 		match bincode::deserialize_from::<_,T>(bytes) {
 			Ok(t) => Ok(t),
-			Err(e) => Err(ErrorKind::InvalidData.into()),
+			Err(_) => Err(ErrorKind::InvalidData.into()),
 		}
 	}
 }
