@@ -1,6 +1,6 @@
 use super::*;
 
-use std::net::{TcpStream,TcpListener};
+// use std::net::{TcpStream,TcpListener};
 use std::thread;
 use std::io::BufWriter;
 use std::io::Read;
@@ -136,10 +136,10 @@ fn both_wrapped_serde() {
 
 ////////////////////// AUX /////////////////////////
 
-fn prep(stream: &TcpStream) {
-	stream.set_nonblocking(true).unwrap();
-	stream.set_nodelay(true).unwrap();
-}
+// fn prep(stream: &TcpStream) {
+// 	stream.set_nonblocking(true).unwrap();
+// 	stream.set_nodelay(true).unwrap();
+// }
 
 
 // fn tcp_pipe() -> [TcpStream; 2] {

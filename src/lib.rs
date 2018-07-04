@@ -172,7 +172,7 @@ impl io::Write for GrowingBuffer {
 
 pub struct De<R,D> where R: Read, D: CanDeserialize {
 	reader: ReadWrapper<R>,
-	holding: Option<*const [u8]>, // internal ref to the state of reader
+	holding: Option<*const [u8]>,
 	de: D,
 }
 impl<R,D> De<R,D> where R: io::Read, D: CanDeserialize {
@@ -180,19 +180,26 @@ impl<R,D> De<R,D> where R: io::Read, D: CanDeserialize {
 		Self { reader: ReadWrapper::new(reader), de, holding: None }
 	}
 	pub fn try_read<T>(&mut self) -> Result<Option<T>, io::Error> where T: DeserializeOwned {
+		// 1. read something into the internal buffer if we haven't already
 		if self.holding.is_none() {
 			if let Some(slice) = self.reader.try_read_preambled()? {
-				println!("GOT SLICE {:?}", slice);
 				self.holding = Some(slice as *const [u8]);
 			} else {
 				return Ok(None);
 			}
 		}
 		let raw_slice  = self.holding.unwrap();
-		// println!("LEN {}", len);
 		let t = self.de.deserialize(unsafe{&*raw_slice})?;
 		self.holding = None;
 		Ok(Some(t))
+	}
+	pub fn pop_holding(&mut self) -> bool {
+		if self.holding.is_some() {
+			self.holding = None;
+			true
+		} else {
+			false
+		}
 	}
 }
 
