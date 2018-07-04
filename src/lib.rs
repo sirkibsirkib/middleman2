@@ -1,10 +1,9 @@
 
 extern crate serde;
 extern crate integer_encoding;
+use serde::{Serialize,de::DeserializeOwned};
 use std::io::{self,Write,Read,ErrorKind};
 use integer_encoding::{VarInt,VarIntWriter,VarIntReader};
-
-
 
 fn size_buffer_to(v: &mut Vec<u8>, size: usize) {
 	while v.len() < size {
@@ -106,9 +105,95 @@ impl<R> ReadWrapper<R> where R: Read + Sized {
 		}
 	}
 	pub fn try_read_preambled(&mut self) -> Result<Option<&mut [u8]>, io::Error> {
-		// let (r, b) = (self.r, self.bufferer);
 		self.bufferer.try_read_preambled(&mut self.r)
 	} 
+}
+
+pub trait CanSerialize {
+	fn serialize_into<T,W>(&mut self, t: &T, w: W) -> Result<(), io::Error> where T: Serialize, W: io::Write;
+}
+pub trait CanDeserialize {
+	fn deserialize<T>(&mut self, &[u8]) -> Result<T, io::Error> where T: DeserializeOwned;
+}
+
+pub struct Ser<S,W> where S: CanSerialize + Sized, W: io::Write + Sized {
+	ser: S,
+	writer: W,
+	buffer: GrowingBuffer,
+}
+
+impl<S,W> Ser<S,W> where S: CanSerialize + Sized, W: io::Write + Sized {
+	pub fn new(writer:W, ser:S) -> Self {
+		Self { writer, ser, buffer: GrowingBuffer::new() }
+	}
+	pub fn write_msg<T>(&mut self, t:&T) -> Result<usize, io::Error> where T: Serialize {
+		self.buffer.clear();
+		self.ser.serialize_into(t, &mut self.buffer)?;
+		write_preambled(&mut self.writer, self.buffer.contents())?;
+		let wrote = self.buffer.occupancy();
+		self.buffer.clear();
+		Ok(wrote)
+	}
+	pub fn flush(&mut self) -> Result<(),io::Error> {
+		self.writer.flush()
+	}
+}
+
+struct GrowingBuffer {
+	buf: Vec<u8>,
+	occupied: usize,
+}
+impl GrowingBuffer {
+	fn new() -> Self {
+		Self {buf: vec![], occupied:0}
+	}
+	fn clear(&mut self) {
+		self.occupied = 0;
+	}
+	fn occupancy(&self) -> usize {
+		self.occupied
+	}
+	fn contents(&self) -> &[u8] {
+		& self.buf[0..self.occupied]
+	}
+}
+impl io::Write for GrowingBuffer {
+    fn write(&mut self, buf: &[u8]) -> std::result::Result<usize, std::io::Error> {
+    	let end = self.occupied + buf.len();
+    	size_buffer_to(&mut self.buf, end);
+    	(&mut self.buf[self.occupied..end]).write(buf)?;
+    	self.occupied += buf.len();
+    	Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::result::Result<(), std::io::Error> {
+    	Ok(())
+    }
+}
+
+pub struct De<R,D> where R: Read, D: CanDeserialize {
+	reader: ReadWrapper<R>,
+	holding: Option<*const [u8]>, // internal ref to the state of reader
+	de: D,
+}
+impl<R,D> De<R,D> where R: io::Read, D: CanDeserialize {
+	pub fn new(reader:R, de:D) -> Self {
+		Self { reader: ReadWrapper::new(reader), de, holding: None }
+	}
+	pub fn try_read<T>(&mut self) -> Result<Option<T>, io::Error> where T: DeserializeOwned {
+		if self.holding.is_none() {
+			if let Some(slice) = self.reader.try_read_preambled()? {
+				println!("GOT SLICE {:?}", slice);
+				self.holding = Some(slice as *const [u8]);
+			} else {
+				return Ok(None);
+			}
+		}
+		let raw_slice  = self.holding.unwrap();
+		// println!("LEN {}", len);
+		let t = self.de.deserialize(unsafe{&*raw_slice})?;
+		self.holding = None;
+		Ok(Some(t))
+	}
 }
 
 ////////////////////////// DEV ////////////////////
@@ -135,6 +220,7 @@ pub fn rw_channel() -> (SendChannel, RecvChannel) {
 }
 
 impl io::Write for SendChannel {
+	#[inline]
 	fn write(&mut self, bytes: &[u8]) -> Result<usize, io::Error> {
 		for byte in bytes.iter().cloned() {
 			if let Err(_) = self.0.send(byte) {
@@ -149,6 +235,7 @@ impl io::Write for SendChannel {
 }
 
 impl io::Read for RecvChannel {
+	#[inline]
 	fn read(&mut self, buffer: &mut [u8]) -> Result<usize, io::Error> {
 		for i in 0..buffer.len() {
 			match self.0.recv() {

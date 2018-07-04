@@ -3,6 +3,8 @@ use super::*;
 use std::net::{TcpStream,TcpListener};
 use std::thread;
 use std::io::BufWriter;
+use std::io::Read;
+use std::io::ErrorKind;
 use std::time;
 
 lazy_static! {
@@ -19,7 +21,7 @@ lazy_static! {
 const SLEEPTIME: time::Duration = time::Duration::from_millis(500);
 
 #[test]
-fn pipe_raw_bytes() {
+fn raw() {
 	let (a, mut b) = rw_channel();
 	let mut a = BufWriter::new(a);
 
@@ -28,8 +30,6 @@ fn pipe_raw_bytes() {
 		write_preambled(&mut a, msg).unwrap();
 	}
 	a.flush().unwrap();
-
-	// thread::sleep(SLEEPTIME);
 
 	// read
 	let mut r = Bufferer::new();
@@ -40,7 +40,7 @@ fn pipe_raw_bytes() {
 }
 
 #[test]
-fn pipe_raw_bytes_wrapped() {
+fn raw_wrapped() {
 	let (a, b) = rw_channel();
 	let (mut a, mut r) = (BufWriter::new(a), ReadWrapper::new(b));
 
@@ -50,10 +50,7 @@ fn pipe_raw_bytes_wrapped() {
 	}
 	a.flush().unwrap();
 
-	// thread::sleep(SLEEPTIME);
-
 	// read
-
 	for msg in RAW_BYTES.iter() {
 		let x = r.try_read_preambled().unwrap().unwrap();
 		assert_eq!(msg, &x);
@@ -65,6 +62,74 @@ struct Whatever {
 	x: u32,
 	y: u64,
 	z: String,
+}
+
+#[test]
+fn raw_wrapped_serde() {
+	let (a, b) = rw_channel();
+	let (mut a, mut r) = (BufWriter::new(a), ReadWrapper::new(b));
+	let messages = vec![
+		Whatever {x:32, y:243, z:"Hello, there.".into()},
+		Whatever {x:23, y:11, z:"Peace, friend.".into()},
+		Whatever {x:1231, y:12324, z:"My, you're a tall one!".into()},
+		Whatever {x:0, y:23, z:"What would you ask of Death?".into()},
+	];
+
+	// write
+	for msg in messages.iter() {
+		let vec = bincode::serialize(msg).unwrap();
+		write_preambled(&mut a, &vec).unwrap();
+	}
+	a.flush().unwrap();
+
+	// read
+	for msg in messages.iter() {
+		let msg2 = r.try_read_preambled().unwrap().unwrap();
+		let mut slice: &[u8] = &msg2;
+		let de = bincode::deserialize_from::<_,Whatever>(&mut slice).unwrap();
+		assert_eq!(msg, &de);
+	}
+}
+
+struct Bincoder;
+impl CanSerialize for Bincoder {
+	fn serialize_into<T,W>(&mut self, t: &T, w: W) -> Result<(), io::Error> where T: Serialize, W: io::Write {
+		match bincode::serialize_into(w, t) {
+			Ok(x) => Ok(x),
+			Err(e) => Err(ErrorKind::InvalidData.into()),
+		}
+	}
+}
+impl CanDeserialize for Bincoder {
+	fn deserialize<T>(&mut self, bytes: &[u8]) -> Result<T, io::Error> where T: DeserializeOwned {
+		println!("PLEASE DESERIALIZE {:?}", bytes);
+		match bincode::deserialize_from::<_,T>(bytes) {
+			Ok(t) => Ok(t),
+			Err(e) => Err(ErrorKind::InvalidData.into()),
+		}
+	}
+}
+
+#[test]
+fn both_wrapped_serde() {
+	let (a, b) = rw_channel();
+	let (mut w, mut r) = (Ser::new(a, Bincoder), De::new(b, Bincoder));
+	let messages = vec![
+		Whatever {x:32, y:243, z:"Hello, there.".into()},
+		Whatever {x:23, y:11, z:"Peace, friend.".into()},
+	];
+
+	// write
+	for msg in messages.iter() {
+		w.write_msg(msg).unwrap();
+	}
+	w.flush().unwrap();
+
+	//read
+	for msg in messages.iter() {
+		let msg2 = r.try_read::<Whatever>().unwrap().unwrap();
+		assert_eq!(msg, &msg2);
+	}
 }
 
 
