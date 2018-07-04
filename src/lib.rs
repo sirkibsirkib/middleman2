@@ -180,15 +180,24 @@ impl<R,D> De<R,D> where R: io::Read, D: CanDeserialize {
 		Self { reader: ReadWrapper::new(reader), de, holding: None }
 	}
 	pub fn try_read<T>(&mut self) -> Result<Option<T>, io::Error> where T: DeserializeOwned {
-		// 1. read something into the internal buffer if we haven't already
+		// 1. read something into `reader`'s buffer
 		if self.holding.is_none() {
 			if let Some(slice) = self.reader.try_read_preambled()? {
+				// 2. save as raw ptr because its introspection which is a No-NO
+				// KINDA UNSAFE. reader thinks we have dropped the reference
+				// but the internals of the buffer dont change until we call
+				// try_read_preambled next time. we prevent reading it by
+				// this if let check above.
 				self.holding = Some(slice as *const [u8]);
 			} else {
+				// return early. nothing to read
 				return Ok(None);
 			}
 		}
+		// we are certain, either way, there must be something to read now.
 		let raw_slice  = self.holding.unwrap();
+		// 3. attempt to deserialize whatever we are holding. UNSAFE
+		// UNSAFE because we dont want to actually MOVE the buffers bytes around
 		let t = self.de.deserialize(unsafe{&*raw_slice})?;
 		self.holding = None;
 		Ok(Some(t))
